@@ -87,7 +87,8 @@ resource "seaweedfs_iam_user" "example" {
 
 ### Required GitHub Secrets for Release
 
-- No extra signing secrets are required for the current workflow.
+- `GPG_PRIVATE_KEY`: ASCII-armored private key used to sign checksum files.
+- `GPG_PASSPHRASE`: Passphrase for that key.
 - `GITHUB_TOKEN` is provided automatically by GitHub Actions.
 
 ### Create First Release
@@ -99,7 +100,7 @@ git tag v0.1.0
 git push origin main --tags
 ```
 
-The release workflow will build archives and publish a GitHub release with checksums.
+The release workflow will build archives and publish a GitHub release with checksums and signatures.
 
 ## Publish To Terraform Registry
 
@@ -108,7 +109,8 @@ The release workflow will build archives and publish a GitHub release with check
   `registry.terraform.io/jonaskop/seaweedfs`.
 3. Push a semver tag (`v0.1.0`, `v0.1.1`, ...), which triggers the release workflow.
 4. In Terraform Registry, publish/add the provider and link the GitHub repo `JonasKop/terraform-provider-seaweedfs`.
-5. After ingestion, users can install with:
+5. In Terraform Registry namespace settings, add your public GPG key.
+6. After ingestion, users can install with:
 
 ```hcl
 terraform {
