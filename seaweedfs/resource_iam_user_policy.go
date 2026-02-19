@@ -83,8 +83,15 @@ func (r *iamUserPolicyResource) Create(ctx context.Context, req resource.CreateR
 		return
 	}
 
+	policyToWrite := plan.Policy.ValueString()
+	if normalized, err := normalizeJSONString(policyToWrite); err == nil {
+		policyToWrite = normalized
+	}
+
 	if err := r.data.withUserLock(plan.UserName.ValueString(), func() error {
-		return r.client.PutUserPolicy(ctx, plan.UserName.ValueString(), plan.Name.ValueString(), plan.Policy.ValueString())
+		return retryIAMEventuallyConsistent(ctx, 20, func() error {
+			return r.client.PutUserPolicy(ctx, plan.UserName.ValueString(), plan.Name.ValueString(), policyToWrite)
+		})
 	}); err != nil {
 		resp.Diagnostics.AddError("Failed to create IAM user policy", err.Error())
 		return
@@ -106,7 +113,10 @@ func (r *iamUserPolicyResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
-	policy, err := r.client.GetUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
+	err := retryIAMEventuallyConsistent(ctx, 10, func() error {
+		_, innerErr := r.client.GetUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
+		return innerErr
+	})
 	if err != nil {
 		if isNoSuchEntityError(err) {
 			resp.State.RemoveResource(ctx)
@@ -117,7 +127,6 @@ func (r *iamUserPolicyResource) Read(ctx context.Context, req resource.ReadReque
 	}
 
 	state.ID = types.StringValue(state.UserName.ValueString() + ":" + state.Name.ValueString())
-	state.Policy = types.StringValue(policy)
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -128,8 +137,15 @@ func (r *iamUserPolicyResource) Update(ctx context.Context, req resource.UpdateR
 		return
 	}
 
+	policyToWrite := plan.Policy.ValueString()
+	if normalized, err := normalizeJSONString(policyToWrite); err == nil {
+		policyToWrite = normalized
+	}
+
 	if err := r.data.withUserLock(plan.UserName.ValueString(), func() error {
-		return r.client.PutUserPolicy(ctx, plan.UserName.ValueString(), plan.Name.ValueString(), plan.Policy.ValueString())
+		return retryIAMEventuallyConsistent(ctx, 20, func() error {
+			return r.client.PutUserPolicy(ctx, plan.UserName.ValueString(), plan.Name.ValueString(), policyToWrite)
+		})
 	}); err != nil {
 		resp.Diagnostics.AddError("Failed to update IAM user policy", err.Error())
 		return
@@ -152,7 +168,9 @@ func (r *iamUserPolicyResource) Delete(ctx context.Context, req resource.DeleteR
 	}
 
 	if err := r.data.withUserLock(state.UserName.ValueString(), func() error {
-		return r.client.DeleteUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
+		return retryIAMEventuallyConsistent(ctx, 20, func() error {
+			return r.client.DeleteUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
+		})
 	}); err != nil && !isNoSuchEntityError(err) {
 		resp.Diagnostics.AddError("Failed to delete IAM user policy", err.Error())
 	}

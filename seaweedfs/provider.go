@@ -30,11 +30,15 @@ type seaweedfsProviderModel struct {
 
 type providerData struct {
 	client    *iamClient
+	iamWrite  sync.Mutex
 	lockMu    sync.Mutex
 	userLocks map[string]*sync.Mutex
 }
 
 func (d *providerData) withUserLock(userName string, fn func() error) error {
+	d.iamWrite.Lock()
+	defer d.iamWrite.Unlock()
+
 	lock := d.getUserLock(userName)
 	lock.Lock()
 	defer lock.Unlock()

@@ -2,6 +2,7 @@ package seaweedfs
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -263,5 +264,77 @@ func TestIAMClientAccessKeyPolicyAndBucket(t *testing.T) {
 
 	if err := client.DeleteAccessKey(ctx, "alice", "AKIA_TEST"); err != nil {
 		t.Fatalf("delete access key: %v", err)
+	}
+}
+
+func TestPoliciesSemanticallyEqual(t *testing.T) {
+	t.Parallel()
+
+	a := `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:*"],"Resource":"*"}]}`
+	b := `{
+  "Statement": [
+    {
+      "Resource": "*",
+      "Action": [
+        "s3:*"
+      ],
+      "Effect": "Allow"
+    }
+  ],
+  "Version": "2012-10-17"
+}`
+
+	if !policiesSemanticallyEqual(a, b) {
+		t.Fatalf("expected policies to be semantically equal")
+	}
+}
+
+func TestRetryIAMEventuallyConsistent(t *testing.T) {
+	t.Parallel()
+
+	attempts := 0
+	err := retryIAMEventuallyConsistent(context.Background(), 4, func() error {
+		attempts++
+		if attempts < 3 {
+			return iamError{Code: "ServiceFailure", Message: "temporary"}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("expected success after retries, got: %v", err)
+	}
+	if attempts != 3 {
+		t.Fatalf("expected 3 attempts, got %d", attempts)
+	}
+}
+
+func TestRetryIAMEventuallyConsistentStopsOnNonRetryableError(t *testing.T) {
+	t.Parallel()
+
+	nonRetryable := errors.New("boom")
+	attempts := 0
+	err := retryIAMEventuallyConsistent(context.Background(), 5, func() error {
+		attempts++
+		return nonRetryable
+	})
+	if !errors.Is(err, nonRetryable) {
+		t.Fatalf("expected non-retryable error, got: %v", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestIAMErrorHelpers(t *testing.T) {
+	t.Parallel()
+
+	if !isEntityAlreadyExistsError(iamError{Code: "EntityAlreadyExists", Message: "exists"}) {
+		t.Fatalf("expected EntityAlreadyExists helper to match")
+	}
+	if !isBucketAlreadyExistsError(iamError{Code: "BucketAlreadyOwnedByYou", Message: "exists"}) {
+		t.Fatalf("expected BucketAlreadyOwnedByYou helper to match")
+	}
+	if !isRetryableIAMError(iamError{Code: "ServiceFailure", Message: "temporary"}) {
+		t.Fatalf("expected ServiceFailure to be retryable")
 	}
 }

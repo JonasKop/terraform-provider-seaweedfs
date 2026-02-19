@@ -78,8 +78,15 @@ func (r *bucketResource) Create(ctx context.Context, req resource.CreateRequest,
 	}
 
 	if err := r.client.CreateBucket(ctx, plan.Bucket.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Failed to create bucket", err.Error())
-		return
+		if !isBucketAlreadyExistsError(err) {
+			resp.Diagnostics.AddError("Failed to create bucket", err.Error())
+			return
+		}
+
+		if headErr := r.client.HeadBucket(ctx, plan.Bucket.ValueString()); headErr != nil {
+			resp.Diagnostics.AddError("Failed to verify existing bucket", headErr.Error())
+			return
+		}
 	}
 
 	state := bucketResourceModel{

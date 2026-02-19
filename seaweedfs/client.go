@@ -387,10 +387,77 @@ func isNoSuchEntityError(err error) bool {
 	return false
 }
 
+func isEntityAlreadyExistsError(err error) bool {
+	var apiErr iamError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == "EntityAlreadyExists"
+	}
+	return false
+}
+
+func isServiceFailureError(err error) bool {
+	var apiErr iamError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == "ServiceFailure" || apiErr.Code == "HTTP500" || apiErr.Code == "HTTP503"
+	}
+	return false
+}
+
+func isRetryableIAMError(err error) bool {
+	return isNoSuchEntityError(err) || isServiceFailureError(err)
+}
+
+func retryIAMEventuallyConsistent(ctx context.Context, attempts int, fn func() error) error {
+	if attempts < 1 {
+		attempts = 1
+	}
+
+	delay := 200 * time.Millisecond
+	var lastErr error
+
+	for i := 0; i < attempts; i++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if !isRetryableIAMError(err) {
+			return err
+		}
+
+		lastErr = err
+		if i == attempts-1 {
+			break
+		}
+
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+
+		delay *= 2
+		if delay > 2*time.Second {
+			delay = 2 * time.Second
+		}
+	}
+
+	return lastErr
+}
+
 func isNoSuchBucketError(err error) bool {
 	var apiErr iamError
 	if errors.As(err, &apiErr) {
 		return apiErr.Code == "NoSuchBucket" || apiErr.Code == "NotFound" || apiErr.Code == "NoSuchKey" || apiErr.Code == "NoSuchEntity"
+	}
+	return false
+}
+
+func isBucketAlreadyExistsError(err error) bool {
+	var apiErr iamError
+	if errors.As(err, &apiErr) {
+		return apiErr.Code == "BucketAlreadyOwnedByYou" || apiErr.Code == "BucketAlreadyExists"
 	}
 	return false
 }

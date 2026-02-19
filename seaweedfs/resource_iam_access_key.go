@@ -87,9 +87,11 @@ func (r *iamAccessKeyResource) Create(ctx context.Context, req resource.CreateRe
 
 	var key iamAccessKey
 	err := r.data.withUserLock(plan.UserName.ValueString(), func() error {
-		var innerErr error
-		key, innerErr = r.client.CreateAccessKey(ctx, plan.UserName.ValueString())
-		return innerErr
+		return retryIAMEventuallyConsistent(ctx, 20, func() error {
+			var innerErr error
+			key, innerErr = r.client.CreateAccessKey(ctx, plan.UserName.ValueString())
+			return innerErr
+		})
 	})
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to create IAM access key", err.Error())
@@ -113,7 +115,12 @@ func (r *iamAccessKeyResource) Read(ctx context.Context, req resource.ReadReques
 		return
 	}
 
-	keys, err := r.client.ListAccessKeys(ctx, state.UserName.ValueString())
+	var keys []iamAccessKeyMetadata
+	err := retryIAMEventuallyConsistent(ctx, 10, func() error {
+		var innerErr error
+		keys, innerErr = r.client.ListAccessKeys(ctx, state.UserName.ValueString())
+		return innerErr
+	})
 	if err != nil {
 		if isNoSuchEntityError(err) {
 			resp.State.RemoveResource(ctx)
@@ -154,7 +161,9 @@ func (r *iamAccessKeyResource) Delete(ctx context.Context, req resource.DeleteRe
 	}
 
 	if err := r.data.withUserLock(state.UserName.ValueString(), func() error {
-		return r.client.DeleteAccessKey(ctx, state.UserName.ValueString(), state.AccessKeyID.ValueString())
+		return retryIAMEventuallyConsistent(ctx, 20, func() error {
+			return r.client.DeleteAccessKey(ctx, state.UserName.ValueString(), state.AccessKeyID.ValueString())
+		})
 	}); err != nil && !isNoSuchEntityError(err) {
 		resp.Diagnostics.AddError("Failed to delete IAM access key", err.Error())
 	}

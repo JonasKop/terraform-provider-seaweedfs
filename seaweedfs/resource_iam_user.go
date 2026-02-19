@@ -102,16 +102,33 @@ func (r *iamUserResource) Create(ctx context.Context, req resource.CreateRequest
 
 	var user getUserResponse
 	err := r.data.withUserLock(plan.Name.ValueString(), func() error {
-		var innerErr error
-		user, innerErr = r.client.CreateUser(ctx, plan.Name.ValueString(), plan.Path.ValueString())
-		return innerErr
+		return retryIAMEventuallyConsistent(ctx, 8, func() error {
+			var innerErr error
+			user, innerErr = r.client.CreateUser(ctx, plan.Name.ValueString(), plan.Path.ValueString())
+			return innerErr
+		})
 	})
 	if err != nil {
-		resp.Diagnostics.AddError(
-			"Failed to create IAM user",
-			err.Error(),
-		)
-		return
+		if isEntityAlreadyExistsError(err) {
+			readErr := retryIAMEventuallyConsistent(ctx, 6, func() error {
+				var innerErr error
+				user, innerErr = r.client.GetUser(ctx, plan.Name.ValueString())
+				return innerErr
+			})
+			if readErr != nil {
+				resp.Diagnostics.AddError(
+					"Failed to read existing IAM user",
+					readErr.Error(),
+				)
+				return
+			}
+		} else {
+			resp.Diagnostics.AddError(
+				"Failed to create IAM user",
+				err.Error(),
+			)
+			return
+		}
 	}
 
 	userPath := user.User.Path
@@ -120,6 +137,19 @@ func (r *iamUserResource) Create(ctx context.Context, req resource.CreateRequest
 		if userPath == "" {
 			userPath = "/"
 		}
+	}
+
+	// SeaweedFS may acknowledge CreateUser before the user is fully visible
+	// to subsequent IAM operations. Ensure visibility before finishing Create.
+	if err := retryIAMEventuallyConsistent(ctx, 20, func() error {
+		_, innerErr := r.client.GetUser(ctx, user.User.UserName)
+		return innerErr
+	}); err != nil {
+		resp.Diagnostics.AddError(
+			"Failed to verify IAM user visibility",
+			err.Error(),
+		)
+		return
 	}
 
 	state := iamUserResourceModel{
@@ -140,7 +170,12 @@ func (r *iamUserResource) Read(ctx context.Context, req resource.ReadRequest, re
 		return
 	}
 
-	user, err := r.client.GetUser(ctx, state.Name.ValueString())
+	var user getUserResponse
+	err := retryIAMEventuallyConsistent(ctx, 6, func() error {
+		var innerErr error
+		user, innerErr = r.client.GetUser(ctx, state.Name.ValueString())
+		return innerErr
+	})
 	if err != nil {
 		if isNoSuchEntityError(err) {
 			resp.State.RemoveResource(ctx)
@@ -185,7 +220,9 @@ func (r *iamUserResource) Delete(ctx context.Context, req resource.DeleteRequest
 	}
 
 	if err := r.data.withUserLock(state.Name.ValueString(), func() error {
-		return r.client.DeleteUser(ctx, state.Name.ValueString())
+		return retryIAMEventuallyConsistent(ctx, 8, func() error {
+			return r.client.DeleteUser(ctx, state.Name.ValueString())
+		})
 	}); err != nil && !isNoSuchEntityError(err) {
 		resp.Diagnostics.AddError(
 			"Failed to delete IAM user",
