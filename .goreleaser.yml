@@ -36,21 +36,6 @@ archives:
 checksum:
   name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
 
-signs:
-  - artifacts: checksum
-    signature: "${artifact}.sig"
-    args:
-      - --batch
-      - --yes
-      - --pinentry-mode
-      - loopback
-      - --local-user
-      - "{{ .Env.GPG_FINGERPRINT }}"
-      - --output
-      - "${signature}"
-      - --detach-sign
-      - "${artifact}"
-
 release:
   github:
     owner: JonasKop

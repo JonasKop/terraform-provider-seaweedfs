@@ -79,8 +79,8 @@ resource "seaweedfs_iam_user" "example" {
 
 ### Required GitHub Secrets for Release
 
-- `GPG_PRIVATE_KEY`: ASCII-armored private key used to sign checksum files.
-- `GPG_PASSPHRASE`: Passphrase for that key.
+- No extra signing secrets are required for the current workflow.
+- `GITHUB_TOKEN` is provided automatically by GitHub Actions.
 
 ### Create First Release
 
