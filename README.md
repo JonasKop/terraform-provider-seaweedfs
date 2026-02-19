@@ -35,6 +35,14 @@ go mod tidy
 go build -o terraform-provider-seaweedfs
 ```
 
+## Generate Docs
+
+```bash
+make docs
+```
+
+This runs `tfplugindocs` via `go generate` and updates files under `docs/`.
+
 ## Use locally with Terraform
 
 Create `~/.terraformrc`:
@@ -91,4 +99,24 @@ git tag v0.1.0
 git push origin main --tags
 ```
 
-The release workflow will build archives and publish a GitHub release with checksums and signatures.
+The release workflow will build archives and publish a GitHub release with checksums.
+
+## Publish To Terraform Registry
+
+1. Keep repo public and named `terraform-provider-seaweedfs`.
+2. Ensure your provider address matches your namespace:
+  `registry.terraform.io/jonaskop/seaweedfs`.
+3. Push a semver tag (`v0.1.0`, `v0.1.1`, ...), which triggers the release workflow.
+4. In Terraform Registry, publish/add the provider and link the GitHub repo `JonasKop/terraform-provider-seaweedfs`.
+5. After ingestion, users can install with:
+
+```hcl
+terraform {
+  required_providers {
+    seaweedfs = {
+      source  = "jonaskop/seaweedfs"
+      version = ">= 0.1.0"
+    }
+  }
+}
+```

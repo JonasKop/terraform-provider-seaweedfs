@@ -9,6 +9,8 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
 )
 
+//go:generate go run github.com/hashicorp/terraform-plugin-docs/cmd/tfplugindocs@latest generate --provider-name seaweedfs
+
 var (
 	version = "dev"
 	commit  = "none"
