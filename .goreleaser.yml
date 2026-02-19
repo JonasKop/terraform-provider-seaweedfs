@@ -1,0 +1,59 @@
+version: 2
+
+project_name: terraform-provider-seaweedfs
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: provider
+    main: ./main.go
+    binary: terraform-provider-seaweedfs_v{{ .Version }}
+    env:
+      - CGO_ENABLED=0
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: provider-archive
+    formats: ["zip"]
+    builds:
+      - provider
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_SHA256SUMS"
+
+signs:
+  - artifacts: checksum
+    signature: "${artifact}.sig"
+    args:
+      - --batch
+      - --yes
+      - --pinentry-mode
+      - loopback
+      - --local-user
+      - "{{ .Env.GPG_FINGERPRINT }}"
+      - --output
+      - "${signature}"
+      - --detach-sign
+      - "${artifact}"
+
+release:
+  github:
+    owner: JonasKop
+    name: terraform-provider-seaweedfs
+  draft: false
+  prerelease: auto

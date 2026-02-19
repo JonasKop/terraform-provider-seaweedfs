@@ -1,0 +1,6 @@
+terraform-provider-seaweedfs
+.terraform/
+.cache/
+*.tfstate
+*.tfstate.*
+crash.log
