@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on Keep a Changelog and this project adheres to Semantic Versioning.
 
+## [0.2.0] - 2026-02-20
+
+### Added
+
+- Added bucket tag support to `seaweedfs_bucket`:
+  - New `tags` attribute (`map(string)`).
+  - Tag management during Create/Read/Update via S3 bucket tagging APIs.
+- Extended client support for bucket tag operations:
+  - `GetBucketTagging`
+  - `PutBucketTagging`
+  - `DeleteBucketTagging`
+- Added/updated tests for bucket tag lifecycle behavior in `seaweedfs/client_test.go`.
+- Updated docs and example configuration to include bucket tags.
+
+### Fixed
+
+- Fixed bucket tagging request signing compatibility issues (`SignatureDoesNotMatch`) by using the AWS S3 SDK client for bucket tagging calls.
+- Verified end-to-end against a live SeaweedFS endpoint (`https://s3.sjoedin.se`) using Vault-managed credentials:
+  - `terraform apply` creates bucket tags successfully.
+  - Follow-up `terraform plan` is clean (no drift).
+
 ## [0.1.1] - 2026-02-19
 
 ### Fixed

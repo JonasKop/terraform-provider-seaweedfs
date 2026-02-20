@@ -21,6 +21,10 @@ resource "seaweedfs_iam_user" "test" {
 resource "seaweedfs_bucket" "test" {
   count  = var.create_bucket ? 1 : 0
   bucket = var.bucket_name
+  tags = {
+    managed_by = "terraform"
+    project    = "homelab"
+  }
 }
 
 resource "seaweedfs_iam_user_policy" "test" {

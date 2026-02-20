@@ -11,12 +11,16 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	s3types "github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/aws/smithy-go"
 )
 
 type iamClientConfig struct {
@@ -33,6 +37,7 @@ type iamClient struct {
 	creds    aws.CredentialsProvider
 	signer   *v4.Signer
 	http     *http.Client
+	s3       *s3.Client
 }
 
 type iamError struct {
@@ -78,6 +83,16 @@ type iamAccessKeyMetadata struct {
 	Status      string `xml:"Status"`
 }
 
+type s3Tagging struct {
+	XMLName xml.Name `xml:"Tagging"`
+	TagSet  []s3Tag  `xml:"TagSet>Tag"`
+}
+
+type s3Tag struct {
+	Key   string `xml:"Key"`
+	Value string `xml:"Value"`
+}
+
 func (e iamError) Error() string {
 	if e.Code == "" && e.Message == "" {
 		return "unknown IAM error"
@@ -116,7 +131,7 @@ func newIAMClient(cfg iamClientConfig) (*iamClient, error) {
 		tr.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec
 	}
 
-	return &iamClient{
+	client := &iamClient{
 		endpoint: strings.TrimRight(cfg.Endpoint, "/"),
 		region:   cfg.Region,
 		creds: credentials.NewStaticCredentialsProvider(
@@ -131,7 +146,17 @@ func newIAMClient(cfg iamClientConfig) (*iamClient, error) {
 			Transport: tr,
 			Timeout:   30 * time.Second,
 		},
-	}, nil
+	}
+
+	client.s3 = s3.New(s3.Options{
+		Region:       client.region,
+		Credentials:  client.creds,
+		HTTPClient:   client.http,
+		BaseEndpoint: aws.String(client.endpoint),
+		UsePathStyle: true,
+	})
+
+	return client, nil
 }
 
 func (c *iamClient) CreateUser(ctx context.Context, userName string, path string) (getUserResponse, error) {
@@ -266,6 +291,62 @@ func (c *iamClient) DeleteBucket(ctx context.Context, name string) error {
 	path := "/" + name
 	_, err := c.doSignedRequest(ctx, "s3", http.MethodDelete, c.endpoint+path, "", "", nil)
 	return err
+}
+
+func (c *iamClient) GetBucketTags(ctx context.Context, name string) (map[string]string, error) {
+	out, err := c.s3.GetBucketTagging(ctx, &s3.GetBucketTaggingInput{
+		Bucket: aws.String(name),
+	})
+	if err != nil {
+		if isNoSuchTagSetError(err) {
+			return map[string]string{}, nil
+		}
+		return nil, fmt.Errorf("get bucket tagging: %w", err)
+	}
+
+	tags := make(map[string]string, len(out.TagSet))
+	for _, tag := range out.TagSet {
+		tags[aws.ToString(tag.Key)] = aws.ToString(tag.Value)
+	}
+	return tags, nil
+}
+
+func (c *iamClient) PutBucketTags(ctx context.Context, name string, tags map[string]string) error {
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	tagSet := make([]s3types.Tag, 0, len(tags))
+	for _, key := range keys {
+		value := tags[key]
+		tagSet = append(tagSet, s3types.Tag{
+			Key:   aws.String(key),
+			Value: aws.String(value),
+		})
+	}
+
+	_, err := c.s3.PutBucketTagging(ctx, &s3.PutBucketTaggingInput{
+		Bucket: aws.String(name),
+		Tagging: &s3types.Tagging{
+			TagSet: tagSet,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("put bucket tagging: %w", err)
+	}
+	return nil
+}
+
+func (c *iamClient) DeleteBucketTags(ctx context.Context, name string) error {
+	_, err := c.s3.DeleteBucketTagging(ctx, &s3.DeleteBucketTaggingInput{
+		Bucket: aws.String(name),
+	})
+	if err != nil {
+		return fmt.Errorf("delete bucket tagging: %w", err)
+	}
+	return nil
 }
 
 func (c *iamClient) doIAMAction(ctx context.Context, form url.Values, out any) error {
@@ -458,6 +539,14 @@ func isBucketAlreadyExistsError(err error) bool {
 	var apiErr iamError
 	if errors.As(err, &apiErr) {
 		return apiErr.Code == "BucketAlreadyOwnedByYou" || apiErr.Code == "BucketAlreadyExists"
+	}
+	return false
+}
+
+func isNoSuchTagSetError(err error) bool {
+	var apiErr smithy.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.ErrorCode() == "NoSuchTagSet"
 	}
 	return false
 }

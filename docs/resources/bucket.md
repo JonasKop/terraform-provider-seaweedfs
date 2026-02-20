@@ -19,6 +19,10 @@ Manages a SeaweedFS S3 bucket.
 
 - `bucket` (String) Bucket name.
 
+### Optional
+
+- `tags` (Map of String) Bucket tags.
+
 ### Read-Only
 
 - `arn` (String) Bucket ARN.

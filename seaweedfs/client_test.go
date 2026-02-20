@@ -2,6 +2,7 @@ package seaweedfs
 
 import (
 	"context"
+	"encoding/xml"
 	"errors"
 	"io"
 	"net/http"
@@ -135,8 +136,63 @@ func TestIAMClientAccessKeyPolicyAndBucket(t *testing.T) {
 	keys := map[string]string{}
 	policies := map[string]string{}
 	buckets := map[string]bool{}
+	bucketTags := map[string]map[string]string{}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, hasTagging := r.URL.Query()["tagging"]
+		if hasTagging {
+			bucket := strings.TrimPrefix(r.URL.Path, "/")
+			if !buckets[bucket] {
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`<Error><Code>NoSuchBucket</Code><Message>Not Found</Message></Error>`))
+				return
+			}
+
+			switch r.Method {
+			case http.MethodGet:
+				tags := bucketTags[bucket]
+				if len(tags) == 0 {
+					w.WriteHeader(http.StatusNotFound)
+					_, _ = w.Write([]byte(`<Error><Code>NoSuchTagSet</Code><Message>No tags</Message></Error>`))
+					return
+				}
+				var out s3Tagging
+				for key, value := range tags {
+					out.TagSet = append(out.TagSet, s3Tag{
+						Key:   key,
+						Value: value,
+					})
+				}
+				data, err := xml.Marshal(out)
+				if err != nil {
+					t.Fatalf("marshal tagging xml: %v", err)
+				}
+				w.Header().Set("Content-Type", "application/xml")
+				_, _ = w.Write(data)
+			case http.MethodPut:
+				var in s3Tagging
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Fatalf("read tagging body: %v", err)
+				}
+				if err := xml.Unmarshal(body, &in); err != nil {
+					t.Fatalf("unmarshal tagging body: %v", err)
+				}
+				tags := map[string]string{}
+				for _, tag := range in.TagSet {
+					tags[tag.Key] = tag.Value
+				}
+				bucketTags[bucket] = tags
+				w.WriteHeader(http.StatusOK)
+			case http.MethodDelete:
+				delete(bucketTags, bucket)
+				w.WriteHeader(http.StatusNoContent)
+			default:
+				t.Fatalf("unexpected tagging method: %s", r.Method)
+			}
+			return
+		}
+
 		if r.Method == http.MethodPut || r.Method == http.MethodHead || r.Method == http.MethodDelete {
 			bucket := strings.TrimPrefix(r.URL.Path, "/")
 			switch r.Method {
@@ -258,6 +314,40 @@ func TestIAMClientAccessKeyPolicyAndBucket(t *testing.T) {
 	if err := client.HeadBucket(ctx, "b1"); err != nil {
 		t.Fatalf("head bucket: %v", err)
 	}
+
+	tags, err := client.GetBucketTags(ctx, "b1")
+	if err != nil {
+		t.Fatalf("get empty bucket tags: %v", err)
+	}
+	if len(tags) != 0 {
+		t.Fatalf("expected no tags, got: %+v", tags)
+	}
+
+	if err := client.PutBucketTags(ctx, "b1", map[string]string{
+		"env":  "prod",
+		"team": "platform",
+	}); err != nil {
+		t.Fatalf("put bucket tags: %v", err)
+	}
+	tags, err = client.GetBucketTags(ctx, "b1")
+	if err != nil {
+		t.Fatalf("get bucket tags: %v", err)
+	}
+	if tags["env"] != "prod" || tags["team"] != "platform" {
+		t.Fatalf("unexpected tags: %+v", tags)
+	}
+
+	if err := client.DeleteBucketTags(ctx, "b1"); err != nil {
+		t.Fatalf("delete bucket tags: %v", err)
+	}
+	tags, err = client.GetBucketTags(ctx, "b1")
+	if err != nil {
+		t.Fatalf("get empty bucket tags after delete: %v", err)
+	}
+	if len(tags) != 0 {
+		t.Fatalf("expected no tags after delete, got: %+v", tags)
+	}
+
 	if err := client.DeleteBucket(ctx, "b1"); err != nil {
 		t.Fatalf("delete bucket: %v", err)
 	}

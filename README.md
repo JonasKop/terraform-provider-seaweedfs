@@ -7,6 +7,7 @@ Custom Terraform provider for SeaweedFS IAM operations.
 - `seaweedfs_bucket`
   - Create via S3 `PUT /{bucket}`
   - Read via S3 `HEAD /{bucket}`
+  - Manage tags via S3 `GET/PUT/DELETE /{bucket}?tagging`
   - Delete via S3 `DELETE /{bucket}`
 - `seaweedfs_iam_user`
   - Create via `CreateUser`
