@@ -113,8 +113,10 @@ func (r *iamUserPolicyResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
+	var remotePolicy string
 	err := retryIAMEventuallyConsistent(ctx, 10, func() error {
-		_, innerErr := r.client.GetUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
+		var innerErr error
+		remotePolicy, innerErr = r.client.GetUserPolicy(ctx, state.UserName.ValueString(), state.Name.ValueString())
 		return innerErr
 	})
 	if err != nil {
@@ -126,6 +128,9 @@ func (r *iamUserPolicyResource) Read(ctx context.Context, req resource.ReadReque
 		return
 	}
 
+	if !policiesSemanticallyEqual(state.Policy.ValueString(), remotePolicy) {
+		state.Policy = types.StringValue(remotePolicy)
+	}
 	state.ID = types.StringValue(state.UserName.ValueString() + ":" + state.Name.ValueString())
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
